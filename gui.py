@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import messagebox
 from datetime import datetime
 import databaselink as database
+from User import User
 
 class TimeTrackingApp:
     """
@@ -58,7 +59,7 @@ class TimeTrackingApp:
         self.new_username_entry.grid(row=0, column=1)
         self.new_password_entry.grid(row=1, column=1)
         
-        tk.Button(self.root, text="Register", command=self.register, font=self.large_font).grid(row=2, column=0, columnspan=2)
+        tk.Button(self.root, text="Register", command=self.register_user, font=self.large_font).grid(row=2, column=0, columnspan=2)
         tk.Button(self.root, text="Back to Login", command=self.create_login_screen, font=self.large_font).grid(row=3, column=0, columnspan=2)
 
     def create_main_screen(self):
@@ -68,7 +69,7 @@ class TimeTrackingApp:
         self.clear_screen()
         
         # Display the logged-in username
-        tk.Label(self.root, text=f"Logged in as: {self.username}", font=self.large_font).grid(row=0, column=0, columnspan=3)
+        tk.Label(self.root, text=f"Logged in as: {self.user.username}", font=self.large_font).grid(row=0, column=0, columnspan=3)
         
         self.clock_in_button = tk.Button(self.root, text="Clock In", command=self.clock_in, font=self.large_font)
         self.clock_out_button = tk.Button(self.root, text="Clock Out", command=self.clock_out, font=self.large_font)
@@ -95,13 +96,11 @@ class TimeTrackingApp:
         username = self.username_entry.get()
         password = self.password_entry.get()
         try:
-
-            user = database.get_user(username)
-            
-            if user and user[2] == password:
-                self.user_id = user[0]
-                self.username = username  # Store the username
+            user_data = database.get_user(username)
+            if user_data and user_data[2] == password:
+                self.user = User(user_data[0], user_data[1], user_data[2])
                 self.create_main_screen()
+                self.update_clock_buttons()
             else:
                 messagebox.showerror("Error", "Invalid credentials")
         except sqlite3.OperationalError:
@@ -109,77 +108,61 @@ class TimeTrackingApp:
         except sqlite3.Error:
             messagebox.showerror("Error", "An error occurred while retrieving user information")
 
-    def register(self):
+    def register_user(self):
         """
         Handle the registration process by adding a new user to the database.
         """
-        new_username = self.new_username_entry.get()
-        new_password = self.new_password_entry.get()
-        
+        username = self.new_username_entry.get()
+        password = self.new_password_entry.get()
         try:
-            database.add_user(new_username, new_password)
+            database.add_user(username, password)
             messagebox.showinfo("Success", "User registered successfully")
             self.create_login_screen()
         except ValueError as e:
             messagebox.showerror("Error", str(e))
         except sqlite3.IntegrityError:
             messagebox.showerror("Error", "Username already exists")
+        except sqlite3.Error:
+            messagebox.showerror("Error", "An error occurred while registering the user")
 
     def clock_in(self):
         """
         Handle the clock-in process by recording the current time in the database.
         """
-        # Check if there is an existing clock-in without a clock-out
-        if database.has_active_clock_in(self.user_id):
-            messagebox.showerror("Error", "You must clock out before clocking in again.")
-            return
-        
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        database.add_clock_record(self.user_id, now)
-        messagebox.showinfo("Info", "Clocked in at " + now)
+        self.user.clock_in()
+        messagebox.showinfo("Info", "Clocked in at " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.update_clock_buttons()
 
     def clock_out(self):
         """
         Handle the clock-out process by recording the current time in the database.
         """
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        database.update_clock_out(self.user_id, now)
-        messagebox.showinfo("Info", "Clocked out at " + now)
+        self.user.clock_out()
+        messagebox.showinfo("Info", "Clocked out at " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.update_clock_buttons()
 
     def view_hours(self):
         """
         Display the total hours worked by the logged-in user.
         """
-        records = database.get_clock_records(self.user_id)
-        print(records)
-        total_hours = 0
-        for record in records:
-            if record[1]:
-                clock_in = datetime.strptime(record[0], '%Y-%m-%d %H:%M:%S')
-                clock_out = datetime.strptime(record[1], '%Y-%m-%d %H:%M:%S')
-                total_hours += (clock_out - clock_in).total_seconds() / 3600
-        
-        messagebox.showinfo("Total Hours", f"{self.username} worked a total of {total_hours:.2f} hours")
+        total_hours = self.user.get_total_hours()
+        messagebox.showinfo("Total Hours", f"{self.user.username} worked a total of {total_hours:.2f} hours")
 
     def update_clock_buttons(self):
         """
         Update the visibility of the clock-in and clock-out buttons based on the user's clock-in status.
         """
-        if database.has_active_clock_in(self.user_id):
-            self.clock_in_button.grid_remove()
-            self.clock_out_button.grid()
+        if database.has_active_clock_in(self.user.id):
+            self.clock_in_button.config(state=tk.DISABLED)
+            self.clock_out_button.config(state=tk.NORMAL)
         else:
-            self.clock_in_button.grid()
-            self.clock_out_button.grid_remove()
+            self.clock_in_button.config(state=tk.NORMAL)
+            self.clock_out_button.config(state=tk.DISABLED)
 
     def logout(self):
         """
         Handle the logout process by clearing the user session and returning to the login screen.
         """
-        self.user_id = None
-        self.username = None
         self.create_login_screen()
 
 if __name__ == "__main__":
